@@ -71,7 +71,7 @@ def extrair_e_organizar(caminho_imagem, pasta_base):
     mascara_sprites = cv2.bitwise_not(mascara_fundo)
     contornos, _ = cv2.findContours(mascara_sprites, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    contador = 0
+    sprites_coletados = []
     for contorno in contornos:
         x, y, w, h = cv2.boundingRect(contorno)
         
@@ -94,9 +94,27 @@ def extrair_e_organizar(caminho_imagem, pasta_base):
             recorte_bgr = img[y_inicio:y_fim, x_inicio:x_fim]
             recorte_bgra = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2BGRA)
             recorte_bgra[:, :, 3] = mascara_sprites[y_inicio:y_fim, x_inicio:x_fim] 
-            
-            nome_arquivo = os.path.join(pasta_destino, f"frame_{contador:03d}.png")
-            cv2.imwrite(nome_arquivo, recorte_bgra)
+
+            sprites_coletados.append({
+                "pasta_destino": pasta_destino,
+                "recorte": recorte_bgra,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h,
+            })
+
+    sprites_por_pasta = {}
+    for sprite in sprites_coletados:
+        sprites_por_pasta.setdefault(sprite["pasta_destino"], []).append(sprite)
+
+    contador = 0
+    for pasta_destino, itens in sprites_por_pasta.items():
+        # Ordena por linha visual primeiro, depois por coluna.
+        itens_ordenados = sorted(itens, key=lambda item: (item["y"], item["x"]))
+        for indice, sprite in enumerate(itens_ordenados):
+            nome_arquivo = os.path.join(pasta_destino, f"frame_{indice:03d}.png")
+            cv2.imwrite(nome_arquivo, sprite["recorte"])
             contador += 1
             
     print(f"✅ Organização concluída! {contador} sprites distribuídos em pastas dentro de '{pasta_base}'.")

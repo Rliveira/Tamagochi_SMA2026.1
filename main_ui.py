@@ -1,16 +1,27 @@
-import sys
 import os
 import random
-from PyQt6.QtWidgets import (QApplication, QLabel, QWidget, QVBoxLayout, 
-                             QProgressBar, QLineEdit, QMenu)
+import re
+import sys
+
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QAction
+from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QInputDialog,
+    QLineEdit,
+    QMenu,
+    QProgressBar,
+    QVBoxLayout,
+    QWidget,
+)
 from dotenv import load_dotenv
 
-from engine_biologia import MotorBiologico
 from agente_llm import CerebroTamagotchi
+from engine_biologia import MotorBiologico
 
 load_dotenv()
+
 
 class ThreadPensamento(QThread):
     resposta_concluida = pyqtSignal(str)
@@ -22,7 +33,6 @@ class ThreadPensamento(QThread):
         self.estado_emocional = estado_emocional
 
     def run(self):
-        # Chama a API do Gemini no fundo
         resposta = self.cerebro.pensar_e_responder(self.mensagem, self.estado_emocional)
         self.resposta_concluida.emit(resposta)
 
@@ -33,53 +43,43 @@ class TamagotchiDesktop(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.posicao_mouse_antiga = None
+        self.base_sprites_dir = self._resolver_diretorio_sprites()
 
-        # ==========================================
-        # 1. LAYOUT PRINCIPAL
-        # ==========================================
         self.layout_principal = QVBoxLayout(self)
         self.layout_principal.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout_principal.setContentsMargins(0, 0, 0, 0)
         self.layout_principal.setSpacing(2)
 
-        # ==========================================
-        # 2. BALÃO DE PENSAMENTO / FALA
-        # ==========================================
         self.balao_fala = QLabel("", self)
         self.balao_fala.setWordWrap(True)
         self.balao_fala.setFixedWidth(120)
         self.balao_fala.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.balao_fala.setStyleSheet("""
-            background-color: white; 
-            border: 2px solid #333; 
-            border-radius: 10px; 
-            padding: 5px; 
-            font-family: Arial; 
-            font-size: 10px; 
+        self.balao_fala.setStyleSheet(
+            """
+            background-color: white;
+            border: 2px solid #333;
+            border-radius: 10px;
+            padding: 5px;
+            font-family: Arial;
+            font-size: 10px;
             color: black;
-        """)
-        self.balao_fala.hide() # Escondido por padrão
+            """
+        )
+        self.balao_fala.hide()
         self.layout_principal.addWidget(self.balao_fala, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # ==========================================
-        # 3. O SPRITE DO POKÉMON
-        # ==========================================
         self.label_imagem = QLabel(self)
         self.label_imagem.setScaledContents(True)
-        self.label_imagem.setFixedSize(50, 50) # Tamanho reduzido
+        self.label_imagem.setFixedSize(50, 50)
         self.layout_principal.addWidget(self.label_imagem, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # ==========================================
-        # 4. HUD: BARRAS DE METABOLISMO
-        # ==========================================
-        self.barra_fome = self.criar_barra_progresso("#FF5722")  # Vermelho
-        self.barra_energia = self.criar_barra_progresso("#2196F3") # Azul
-        self.barra_tedio = self.criar_barra_progresso("#FFC107")   # Amarelo
-        self.barra_saude = self.criar_barra_progresso("#4CAF50")   # Verde
+        self.barra_fome = self.criar_barra_progresso("#FF5722")
+        self.barra_energia = self.criar_barra_progresso("#2196F3")
+        self.barra_tedio = self.criar_barra_progresso("#FFC107")
 
-        # ==========================================
-        # 5. CAIXA DE CHAT (Entrada do Usuário)
-        # ==========================================
+        self.barra_fase = self.criar_barra_progresso("#9C27B0")
+        self.barra_fase.setToolTip("Progresso até a próxima fase")
+
         self.input_chat = QLineEdit(self)
         self.input_chat.setPlaceholderText("Fale com ele...")
         self.input_chat.setStyleSheet("background-color: white; color: black; border-radius: 5px; font-size: 10px;")
@@ -88,61 +88,96 @@ class TamagotchiDesktop(QWidget):
         self.input_chat.returnPressed.connect(self.enviar_mensagem_ia)
         self.layout_principal.addWidget(self.input_chat, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # ==========================================
-        # 6. CONFIGURAÇÃO DE ANIMAÇÃO E MOTORES
-        # ==========================================
         self.frames = []
         self.frame_atual_index = 0
         self.animacao_atual = ""
         self.estado_emocional_atual = "movement"
+        self.estado_biologico_atual = ("1_togepi", "movement")
+        self.efeito_visual_tool_id = 0
+        self.efeito_visual_ativo = False
+        self.timer_retorno_animacao = QTimer(self)
+        self.timer_retorno_animacao.setSingleShot(True)
+        self.timer_retorno_animacao.timeout.connect(self._restaurar_animacao_biologica)
 
         self.timer_animacao = QTimer(self)
         self.timer_animacao.timeout.connect(self.atualizar_frame)
         self.timer_animacao.start(150)
 
-        # Inicia a Biologia
         self.motor = MotorBiologico()
-        self.motor.mudar_animacao.connect(self.carregar_animacao)
+        self.motor.mudar_animacao.connect(self.carregar_animacao_motor)
         self.motor.status_atualizado.connect(self.atualizar_hud)
         self.motor.start()
 
-        # Inicia o Cérebro (IA) passando a referência do Blackboard
+        self.carregar_animacao_motor("1_togepi", "movement")
+
         chave_api = os.getenv("GEMINI_API_KEY")
         if not chave_api:
             print("⚠️ AVISO: GEMINI_API_KEY não encontrada no .env!")
-            
+
         self.cerebro_llm = CerebroTamagotchi(chave_api, self.motor.blackboard)
         self.thread_pensamento = None
 
+    def _resolver_diretorio_sprites(self):
+        diretorio_base = os.path.dirname(os.path.abspath(__file__))
+        candidatos = [
+            os.path.join(diretorio_base, "sprites_organizados"),
+            os.path.join(diretorio_base, "extrator_sprites", "sprites_organizados"),
+            os.path.join(diretorio_base, "extrator_sprites", "sprites_processados_dersorganizados"),
+        ]
+
+        for candidato in candidatos:
+            if os.path.exists(candidato):
+                return candidato
+
+        print("⚠️ AVISO: Nenhuma pasta de sprites encontrada. Verifique sprites_organizados.")
+        return candidatos[0]
+
     def criar_barra_progresso(self, cor_hex):
-        """Cria barras finas e minimalistas para o layout."""
         barra = QProgressBar(self)
-        barra.setFixedSize(50, 4) # Altura de apenas 4 pixels
+        barra.setFixedSize(50, 4)
         barra.setTextVisible(False)
-        barra.setStyleSheet(f"""
+        barra.setStyleSheet(
+            f"""
             QProgressBar {{ border: 1px solid #ccc; border-radius: 2px; background-color: transparent; }}
             QProgressBar::chunk {{ background-color: {cor_hex}; border-radius: 2px; }}
-        """)
+            """
+        )
         self.layout_principal.addWidget(barra, alignment=Qt.AlignmentFlag.AlignCenter)
         return barra
 
-    # ==========================================
-    # LÓGICA DE INTERFACE E EVENTOS
-    # ==========================================
     def atualizar_hud(self, blackboard):
-        """Atualiza as barras com base no Motor Biológico e avalia pensamentos instintivos."""
-        self.barra_fome.setValue(100 - blackboard["fome"]) # Invertido para secar conforme sente fome
+        self.barra_fome.setValue(100 - blackboard["fome"])
         self.barra_energia.setValue(blackboard["energia"])
-        self.barra_tedio.setValue(100 - blackboard["tedio"]) # Invertido para secar conforme o tédio sobe
-        self.barra_saude.setValue(blackboard["saude"])
+        self.barra_tedio.setValue(100 - blackboard["tedio"])
+        self._atualizar_barra_fase(blackboard["maturidade"])
+        self._verificar_efeito_visual_tool(blackboard)
 
-        # Sorteio offline para balões de pensamento autônomos (15% de chance a cada tick de metabolismo)
         if not self.balao_fala.isVisible() and random.random() < 0.15:
             self.gerar_pensamento_autonomo(blackboard)
 
+    def _atualizar_barra_fase(self, maturidade):
+        if maturidade < 20:
+            fase_atual = 1
+            inicio = 0
+            fim = 20
+        elif maturidade < 50:
+            fase_atual = 2
+            inicio = 20
+            fim = 50
+        else:
+            fase_atual = 3
+            inicio = 50
+            fim = 50
+
+        if fase_atual == 3:
+            progresso = 100
+        else:
+            progresso = int(((maturidade - inicio) / (fim - inicio)) * 100)
+            progresso = max(0, min(100, progresso))
+
+        self.barra_fase.setValue(progresso)
+
     def gerar_pensamento_autonomo(self, blackboard):
-        """Gera falas instintivas baseadas nas métricas reais, sem gastar API."""
-        pensamento = ""
         if blackboard["fome"] > 75:
             pensamento = "Toge... ronnc... (fome)"
         elif blackboard["energia"] < 25:
@@ -157,57 +192,98 @@ class TamagotchiDesktop(QWidget):
         self.exibir_balao(pensamento, tempo_ms=4000)
 
     def exibir_balao(self, texto, tempo_ms=5000):
-        """Exibe o balão e cria um timer para escondê-lo depois."""
         self.balao_fala.setText(texto)
         self.balao_fala.show()
         QTimer.singleShot(tempo_ms, self.balao_fala.hide)
 
     def enviar_mensagem_ia(self):
-        """Captura o texto digitado e aciona o Gemini em segundo plano."""
         mensagem = self.input_chat.text()
         if not mensagem.strip():
             return
 
         self.input_chat.clear()
         self.input_chat.hide()
-        self.exibir_balao("Pensando...", tempo_ms=20000) # Mantém aberto até a IA responder
+        self.exibir_balao("Pensando...", tempo_ms=20000)
 
-        # Dispara a Thread da LLM
         self.thread_pensamento = ThreadPensamento(self.cerebro_llm, mensagem, self.estado_emocional_atual)
         self.thread_pensamento.resposta_concluida.connect(self.receber_resposta_ia)
         self.thread_pensamento.start()
 
     def receber_resposta_ia(self, resposta):
-        """Callback acionado quando o Gemini termina de formular a frase."""
-        self.exibir_balao(resposta, tempo_ms=7000) # Exibe a resposta final por 7 segundos
+        self.exibir_balao(resposta, tempo_ms=7000)
 
-    # ==========================================
-    # ANIMAÇÃO DE SPRITES
-    # ==========================================
-    def carregar_animacao(self, estagio_vida, emocao):
-        caminho_pasta = os.path.join("sprites_organizados", estagio_vida, emocao)
+    def _chave_ordenacao_frame(self, nome_arquivo):
+        correspondencia = re.search(r"(\d+)", nome_arquivo)
+        return int(correspondencia.group(1)) if correspondencia else nome_arquivo
+
+    def _carregar_animacao(self, estagio_vida, emocao):
+        if emocao == "movement":
+            caminho_pasta = os.path.join(self.base_sprites_dir, estagio_vida, "movement")
+            if not os.path.exists(caminho_pasta):
+                caminho_pasta = os.path.join(self.base_sprites_dir, estagio_vida, "idle_movement")
+        else:
+            caminho_pasta = os.path.join(self.base_sprites_dir, estagio_vida, emocao)
+
         self.estado_emocional_atual = emocao
-        
+
         if self.animacao_atual == caminho_pasta:
             return
-        
+
         self.animacao_atual = caminho_pasta
         self.frames.clear()
-        
+
         if os.path.exists(caminho_pasta):
-            arquivos = sorted([f for f in os.listdir(caminho_pasta) if f.endswith('.png')])
+            arquivos = sorted(
+                [f for f in os.listdir(caminho_pasta) if f.endswith('.png')],
+                key=self._chave_ordenacao_frame,
+            )
             for arquivo in arquivos:
-                self.frames.append(QPixmap(os.path.join(caminho_pasta, arquivo)))
+                pixmap = QPixmap(os.path.join(caminho_pasta, arquivo))
+                if not pixmap.isNull():
+                    self.frames.append(pixmap)
             self.frame_atual_index = 0
+        else:
+            print(f"⚠️ AVISO: pasta de animação não encontrada: {caminho_pasta}")
+
+        if not self.frames:
+            print(f"⚠️ AVISO: nenhum frame carregado para {estagio_vida}/{emocao} em {caminho_pasta}")
+
+    def carregar_animacao_motor(self, estagio_vida, emocao):
+        self.estado_biologico_atual = (estagio_vida, emocao)
+        if self.efeito_visual_ativo:
+            return
+        self._carregar_animacao(estagio_vida, emocao)
+
+    def carregar_animacao_visual(self, estagio_vida, emocao, duracao_ms=1200):
+        self.efeito_visual_ativo = True
+        self._carregar_animacao(estagio_vida, emocao)
+        self.timer_retorno_animacao.start(max(250, int(duracao_ms)))
+
+    def _restaurar_animacao_biologica(self):
+        self.efeito_visual_ativo = False
+        estagio_vida, emocao = self.estado_biologico_atual
+        self._carregar_animacao(estagio_vida, emocao)
+
+    def _verificar_efeito_visual_tool(self, blackboard):
+        evento_visual = blackboard.get("visual_tool_event")
+        if not isinstance(evento_visual, dict):
+            return
+
+        evento_id = evento_visual.get("id")
+        if evento_id is None or evento_id == self.efeito_visual_tool_id:
+            return
+
+        self.efeito_visual_tool_id = evento_id
+        estagio = evento_visual.get("estagio", self.estado_biologico_atual[0])
+        emocao = evento_visual.get("emocao", "movement")
+        duracao_ms = evento_visual.get("duracao_ms", 1200)
+        self.carregar_animacao_visual(estagio, emocao, duracao_ms)
 
     def atualizar_frame(self):
         if self.frames:
             self.label_imagem.setPixmap(self.frames[self.frame_atual_index])
             self.frame_atual_index = (self.frame_atual_index + 1) % len(self.frames)
 
-    # ==========================================
-    # CONTROLES DO MOUSE (Mover, Carinho e Menu)
-    # ==========================================
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.posicao_mouse_antiga = event.globalPosition().toPoint()
@@ -227,9 +303,24 @@ class TamagotchiDesktop(QWidget):
             self.motor.interagir_com_mouse("carinho_rapido")
 
     def contextMenuEvent(self, event):
-        """Botão direito agora abre um menu com opções."""
         menu = QMenu(self)
-        
+
+        acao_definir_nomes = QAction("✏️ Definir nomes", self)
+        acao_definir_nomes.triggered.connect(self.definir_nomes)
+        menu.addAction(acao_definir_nomes)
+
+        acao_alimentar = QAction("🍎 Alimentar", self)
+        acao_alimentar.triggered.connect(self.alimentar_pet)
+        menu.addAction(acao_alimentar)
+
+        acao_brincar = QAction("🎾 Brincar", self)
+        acao_brincar.triggered.connect(self.brincar_com_pet)
+        menu.addAction(acao_brincar)
+
+        acao_descansar = QAction("💤 Descansar", self)
+        acao_descansar.triggered.connect(self.descansar_pet)
+        menu.addAction(acao_descansar)
+
         acao_conversar = QAction("💬 Conversar", self)
         acao_conversar.triggered.connect(lambda: (self.input_chat.show(), self.input_chat.setFocus()))
         menu.addAction(acao_conversar)
@@ -237,15 +328,57 @@ class TamagotchiDesktop(QWidget):
         acao_fechar = QAction("❌ Fechar Tamagotchi", self)
         acao_fechar.triggered.connect(self.fechar_aplicacao)
         menu.addAction(acao_fechar)
-        
+
         menu.exec(event.globalPos())
+
+    def definir_nomes(self):
+        nome_dono_atual = self.motor.blackboard.get("nome_dono", "dono")
+        nome_pet_atual = self.motor.blackboard.get("nome_pet", "Togepi")
+
+        nome_dono, ok_dono = QInputDialog.getText(
+            self,
+            "Definir nome do dono",
+            "Digite o nome do dono:",
+            text=nome_dono_atual,
+        )
+        if not ok_dono:
+            return
+
+        nome_pet, ok_pet = QInputDialog.getText(
+            self,
+            "Definir nome do pet",
+            "Digite o nome do pet:",
+            text=nome_pet_atual,
+        )
+        if not ok_pet:
+            return
+
+        nome_dono = nome_dono.strip() or nome_dono_atual
+        nome_pet = nome_pet.strip() or nome_pet_atual
+
+        self.motor.blackboard["nome_dono"] = nome_dono
+        self.motor.blackboard["nome_pet"] = nome_pet
+        self.exibir_balao(f"Agora eu sou {nome_pet} e meu dono é {nome_dono}.", tempo_ms=5000)
+
+    def alimentar_pet(self):
+        mensagem = self.motor.alimentar()
+        self.exibir_balao(mensagem, tempo_ms=3500)
+
+    def brincar_com_pet(self):
+        mensagem = self.motor.brincar()
+        self.exibir_balao(mensagem, tempo_ms=3500)
+
+    def descansar_pet(self):
+        mensagem = self.motor.descansar()
+        self.exibir_balao(mensagem, tempo_ms=3500)
 
     def fechar_aplicacao(self):
         self.motor.blackboard["vivo"] = False
         self.motor.wait()
         QApplication.quit()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     pet = TamagotchiDesktop()
     pet.show()

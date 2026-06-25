@@ -1,6 +1,8 @@
 import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from behavior_tree import BehaviorContext, build_biological_behavior_tree
+
 class MotorBiologico(QThread):
     # ==========================================
     # SINAIS (Comunicação com a Interface)
@@ -19,8 +21,11 @@ class MotorBiologico(QThread):
             "tedio": 30,
             "saude": 100,
             "maturidade": 0,
-            "vivo": True
+            "vivo": True,
+            "nome_dono": "dono",
+            "nome_pet": "bebê"
         }
+        self.arvore_comportamental = build_biological_behavior_tree()
 
     def run(self):
         """
@@ -56,33 +61,56 @@ class MotorBiologico(QThread):
 
     def _avaliar_estado_fisico(self):
         """
-        Atua como uma Behavior Tree simplificada e reativa.
-        Avalia o Blackboard e decide qual é o sprite correto agora.
+        Avalia o Blackboard por uma Behavior Tree explícita e decide qual é o sprite correto agora.
         """
-        idade = self.blackboard["maturidade"]
-        
-        # 1. Regra de Evolução de Idade
-        if idade < 20:
-            estagio = "1_togepi"
-        elif idade < 50:
-            estagio = "2_togetic"
-        else:
-            estagio = "3_togekiss"
+        contexto = BehaviorContext(blackboard=self.blackboard)
+        decisao = self.arvore_comportamental.run(contexto)
 
-        # 2. Regra de Humor (Prioridade de Necessidades)
-        emocao = "movement" # Estado padrão (andando/respirando)
-        
-        if self.blackboard["saude"] <= 0:
-            emocao = "hurt" # Representa nocaute/morte
-        elif self.blackboard["energia"] <= 15:
-            emocao = "asleep" # Caiu no sono
-        elif self.blackboard["saude"] <= 30 or self.blackboard["fome"] >= 80:
-            emocao = "hurt" # Sentindo dor ou muita fome
-        elif self.blackboard["tedio"] >= 70:
-            emocao = "idle_attack" # Agitado/Irritado por falta de atenção
-            
-        # Avisa a interface para trocar a pasta de imagens!
+        if decisao.estagio:
+            self.mudar_animacao.emit(decisao.estagio, decisao.emocao)
+
+    def _estagio_atual(self):
+        idade = self.blackboard["maturidade"]
+        if idade < 20:
+            return "1_togepi"
+        if idade < 50:
+            return "2_togetic"
+        return "3_togekiss"
+
+    def alimentar(self) -> str:
+        """Alimenta o pet sem depender da LLM."""
+        if not self.blackboard["vivo"]:
+            return "O pet não pode ser alimentado agora."
+
+        self.blackboard["fome"] = max(0, self.blackboard["fome"] - 35)
+        self.blackboard["saude"] = min(100, self.blackboard["saude"] + 4)
+
+        estagio = self._estagio_atual()
+        self.mudar_animacao.emit(estagio, "special_attack")
+        return "Toge! *come feliz e fica mais confortável*"
+
+    def brincar(self) -> str:
+        """Brinca com o pet sem depender da LLM."""
+        if not self.blackboard["vivo"]:
+            return "O pet não pode brincar agora."
+
+        self.blackboard["tedio"] = max(0, self.blackboard["tedio"] - 30)
+        self.blackboard["saude"] = min(100, self.blackboard["saude"] + 2)
+
+        estagio = self._estagio_atual()
+        emocao = "special_attack" if estagio == "1_togepi" else "attack"
         self.mudar_animacao.emit(estagio, emocao)
+        return "Toge toge! *brinca animado com o dono*"
+
+    def descansar(self) -> str:
+        """Permite que o pet descanse sem chamar a LLM."""
+        if not self.blackboard["vivo"]:
+            return "O pet não pode descansar agora."
+
+        self.blackboard["energia"] = min(100, self.blackboard["energia"] + 25)
+        estagio = self._estagio_atual()
+        self.mudar_animacao.emit(estagio, "asleep")
+        return "Toge... *descansa em paz por um instante*"
 
     def interagir_com_mouse(self, tipo_interacao):
         """
