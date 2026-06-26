@@ -19,7 +19,8 @@ from dotenv import load_dotenv
 
 from agente_llm import CerebroTamagotchi
 from engine_biologia import MotorBiologico
-
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl  
+from PyQt6.QtMultimedia import QSoundEffect  
 load_dotenv()
 
 
@@ -68,17 +69,25 @@ class TamagotchiDesktop(QWidget):
         self.balao_fala.hide()
         self.layout_principal.addWidget(self.balao_fala, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Janela de animação do sprite do Togepi
         self.label_imagem = QLabel(self)
         self.label_imagem.setScaledContents(True)
-        self.label_imagem.setFixedSize(50, 50)
+        self.label_imagem.setFixedSize(60,60)
         self.layout_principal.addWidget(self.label_imagem, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.barra_fome = self.criar_barra_progresso("#FF5722")
-        self.barra_energia = self.criar_barra_progresso("#2196F3")
-        self.barra_tedio = self.criar_barra_progresso("#FFC107")
+        tooltip_texts = [
+            "fome", "energia", "tedio", "fase"
+        ]
 
-        self.barra_fase = self.criar_barra_progresso("#9C27B0")
-        self.barra_fase.setToolTip("Progresso até a próxima fase")
+        self.barra_fome = self.criar_barra_progresso("#FF5722", "🍖", tooltip_texts[0])   # F = Fome[cite: 4]
+        self.barra_energia = self.criar_barra_progresso("#2196F3", "⚡", tooltip_texts[1]) # E = Energia[cite: 4]
+        self.barra_tedio = self.criar_barra_progresso("#FFC107", "🎮", tooltip_texts[2])   # T = Tédio[cite: 4]
+        self.barra_fase = self.criar_barra_progresso("#9C27B0", "🌟", tooltip_texts[3])    # V = Vida/Evolução[cite: 4]
+
+        self.barra_fase.setToolTip(tooltip_texts[3])
+        self.barra_fome.setToolTip(tooltip_texts[0])
+        self.barra_energia.setToolTip(tooltip_texts[1])
+        self.barra_tedio.setToolTip(tooltip_texts[2])
 
         self.input_chat = QLineEdit(self)
         self.input_chat.setPlaceholderText("Fale com ele...")
@@ -98,6 +107,15 @@ class TamagotchiDesktop(QWidget):
         self.timer_retorno_animacao = QTimer(self)
         self.timer_retorno_animacao.setSingleShot(True)
         self.timer_retorno_animacao.timeout.connect(self._restaurar_animacao_biologica)
+
+        self.som_cry = QSoundEffect(self)
+        self.diretorio_sons = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds_of_cry")
+        
+        # Função interna rápida para carregar o arquivo correto baseado no estágio
+        self.atualizar_audio_estagio("1_togepi")
+
+        # Toca o som de nascimento/abertura imediatamente
+        self.tocar_som()
 
         self.timer_animacao = QTimer(self)
         self.timer_animacao.timeout.connect(self.atualizar_frame)
@@ -132,17 +150,49 @@ class TamagotchiDesktop(QWidget):
         print("⚠️ AVISO: Nenhuma pasta de sprites encontrada. Verifique sprites_organizados.")
         return candidatos[0]
 
-    def criar_barra_progresso(self, cor_hex):
+    def criar_barra_progresso(self, cor_hex, rotulo_texto, tooltip_texto):
+        """Cria uma barra mais larga acompanhada de uma letra identificadora."""
+        from PyQt6.QtWidgets import QHBoxLayout
+
+        # Criamos um container horizontal específico para este status
+        layout_linha = QHBoxLayout()
+        layout_linha.setContentsMargins(0, 0, 0, 0)
+        layout_linha.setSpacing(4)
+        layout_linha.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Criamos o indicador de texto (Letra ou Emoji)
+        label_status = QLabel(rotulo_texto, self)
+        label_status.setStyleSheet("""
+            color: white; 
+            font-family: Arial; 
+            font-size: 11px; 
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 120);
+            border-radius: 2px;
+            padding-left: 2px;
+            padding-right: 2px;
+        """)
+        label_status.setFixedWidth(12) # Garante alinhamento vertical perfeito
+        label_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label_status.setToolTip(f"Status: {tooltip_texto}")
+
+        # Criamos a barra de progresso ajustada
         barra = QProgressBar(self)
-        barra.setFixedSize(50, 4)
+        barra.setFixedSize(70, 7)
         barra.setTextVisible(False)
         barra.setStyleSheet(
             f"""
-            QProgressBar {{ border: 1px solid #ccc; border-radius: 2px; background-color: transparent; }}
+            QProgressBar {{ border: 1px solid #333; border-radius: 3px; background-color: rgba(0, 0, 0, 50); }}
             QProgressBar::chunk {{ background-color: {cor_hex}; border-radius: 2px; }}
             """
         )
-        self.layout_principal.addWidget(barra, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Adicionamos os dois elementos lado a lado na linha
+        layout_linha.addWidget(label_status)
+        layout_linha.addWidget(barra)
+
+        # Inserimos essa linha no layout principal vertical do Tamagotchi
+        self.layout_principal.addLayout(layout_linha)
         return barra
 
     def atualizar_hud(self, blackboard):
@@ -188,6 +238,7 @@ class TamagotchiDesktop(QWidget):
             pensamento = "Toge... *cof cof*"
         else:
             pensamento = "*Cantarolando feliz*"
+            self.tocar_som()  # Toca o som de grito feliz ocasionalmente
 
         self.exibir_balao(pensamento, tempo_ms=4000)
 
@@ -249,6 +300,11 @@ class TamagotchiDesktop(QWidget):
             print(f"⚠️ AVISO: nenhum frame carregado para {estagio_vida}/{emocao} em {caminho_pasta}")
 
     def carregar_animacao_motor(self, estagio_vida, emocao):
+        # Se mudou de estágio (Evolução!), atualiza o áudio e toca
+        if self.estado_biologico_atual[0] != estagio_vida:
+            self.atualizar_audio_estagio(estagio_vida)
+            self.tocar_som()
+            
         self.estado_biologico_atual = (estagio_vida, emocao)
         if self.efeito_visual_ativo:
             return
@@ -263,6 +319,22 @@ class TamagotchiDesktop(QWidget):
         self.efeito_visual_ativo = False
         estagio_vida, emocao = self.estado_biologico_atual
         self._carregar_animacao(estagio_vida, emocao)
+
+    def atualizar_audio_estagio(self, estagio_vida):
+        """Muda o arquivo de áudio carregado conforme o Pokémon evolui."""
+        nome_arquivo = f"{estagio_vida.split('_')[1]}_cry.wav" # Transforma '1_togepi' em 'togepi_cry.wav'
+        caminho_som = os.path.join(self.diretorio_sons, nome_arquivo)
+        
+        if os.path.exists(caminho_som):
+            self.som_cry.setSource(QUrl.fromLocalFile(caminho_som))
+            self.som_cry.setVolume(0.5) # Volume em 50%
+        else:
+            print(f"⚠️ AVISO: Arquivo de áudio não encontrado: {caminho_som}")
+
+    def tocar_som(self):
+        """Gatilhador para reproduzir o grito se ele estiver carregado."""
+        if self.som_cry.status() != QSoundEffect.Status.Error:
+            self.som_cry.play()
 
     def _verificar_efeito_visual_tool(self, blackboard):
         evento_visual = blackboard.get("visual_tool_event")
@@ -325,7 +397,7 @@ class TamagotchiDesktop(QWidget):
         acao_conversar.triggered.connect(lambda: (self.input_chat.show(), self.input_chat.setFocus()))
         menu.addAction(acao_conversar)
 
-        acao_fechar = QAction("❌ Fechar Tamagotchi", self)
+        acao_fechar = QAction("❌ Fechar janela", self)
         acao_fechar.triggered.connect(self.fechar_aplicacao)
         menu.addAction(acao_fechar)
 
