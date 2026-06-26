@@ -30,7 +30,7 @@ class MotorBiologico(QThread):
     def run(self):
         """
         Loop assíncrono que roda em segundo plano.
-        Substitui o nosso antigo "time.sleep(10)" problemático do Colab.
+        Substitui o nosso antigo "time.sleep(10)"
         """
         ciclos_segundos = 0
         
@@ -38,14 +38,14 @@ class MotorBiologico(QThread):
             time.sleep(1) # O relógio bate a cada segundo silenciosamente
             ciclos_segundos += 1
             
-            # O metabolismo real e pesado acontece a cada 10 segundos
-            if ciclos_segundos >= 10:
+            # O metabolismo real e pesado acontece a cada 300 segundos (5 minutos)
+            if ciclos_segundos >= 300:
                 self.blackboard["fome"] = min(100, self.blackboard["fome"] + 3)
                 self.blackboard["energia"] = max(0, self.blackboard["energia"] - 2)
                 self.blackboard["tedio"] = min(100, self.blackboard["tedio"] + 4)
                 self.blackboard["maturidade"] += 1
                 
-                # Penalidades médicas
+                # Penalidades médicas caso o pet esteja em estado crítico
                 if self.blackboard["fome"] >= 85 or self.blackboard["energia"] <= 15:
                     self.blackboard["saude"] = max(0, self.blackboard["saude"] - 8)
                 
