@@ -20,12 +20,23 @@ class MotorBiologico(QThread):
             "energia": 90,
             "tedio": 30,
             "saude": 100,
-            "maturidade": 0,
+            "maturidade": 26,
             "vivo": True,
             "nome_dono": "dono",
             "nome_pet": "bebê"
         }
         self.arvore_comportamental = build_biological_behavior_tree()
+        
+    def _obter_multiplicadores(self):
+        """Retorna (fome, energia, tedio) com base na maturidade."""
+        idade = self.blackboard["maturidade"]
+        
+        if idade < 20:   # 1_togepi (Bebê)
+            return {"fome": 6, "energia": -3, "tedio": 0} # Tédio 0 para simplificar
+        elif idade < 50: # 2_togetic (Adolescente)
+            return {"fome": 3, "energia": -2, "tedio": 4}
+        else:            # 3_togekiss (Adulto)
+            return {"fome": 1, "energia": -1, "tedio": 2}
 
     def run(self):
         """
@@ -39,10 +50,12 @@ class MotorBiologico(QThread):
             ciclos_segundos += 1
             
             # O metabolismo real e pesado acontece a cada 300 segundos (5 minutos)
-            if ciclos_segundos >= 300:
-                self.blackboard["fome"] = min(100, self.blackboard["fome"] + 3)
-                self.blackboard["energia"] = max(0, self.blackboard["energia"] - 2)
-                self.blackboard["tedio"] = min(100, self.blackboard["tedio"] + 4)
+            if ciclos_segundos >= 5:
+                mult = self._obter_multiplicadores()
+        
+                self.blackboard["fome"] = min(100, self.blackboard["fome"] + mult["fome"])
+                self.blackboard["energia"] = max(0, self.blackboard["energia"] + mult["energia"])
+                self.blackboard["tedio"] = min(100, self.blackboard["tedio"] + mult["tedio"])
                 self.blackboard["maturidade"] += 1
                 
                 # Penalidades médicas caso o pet esteja em estado crítico

@@ -1,0 +1,44 @@
+[
+    {
+        "id": "e9e73508",
+        "data_coleta": "29/06 08:58",
+        "tema": "Introdução à Ciência da Computação",
+        "entidades_chave": [
+            "algoritmos",
+            "computação",
+            "hardware",
+            "software",
+            "programação",
+            "dados"
+        ],
+        "conteudo": "A Ciência da Computação não é só sobre computadores, mas sobre resolver problemas usando algoritmos! Aprendi que ela estuda a manipulação, armazenamento e transmissão de informações de forma sistemática. Desde a arquitetura de hardware até o desenvolvimento de softwares complexos e inteligência artificial, tudo se baseia em lógica matemática e estruturas de dados para transformar problemas do mundo real em soluções automatizadas. É incrível como regras simples combinadas podem criar sistemas tão complexos!"
+    },
+    {
+        "id": "f1a1227c",
+        "data_coleta": "29/06 10:00",
+        "tema": "Celso Furtado e o Subdesenvolvimento Brasileiro",
+        "entidades_chave": [
+            "Celso Furtado",
+            "subdesenvolvimento",
+            "CEPAL",
+            "economia brasileira",
+            "estruturalismo",
+            "industrialização"
+        ],
+        "conteudo": "Celso Furtado foi um economista brasileiro brilhante que revolucionou a forma como entendemos o subdesenvolvimento na América Latina! Ele mostrou que o subdesenvolvimento não é apenas uma fase prévia ao desenvolvimento, mas uma estrutura histórica específica gerada pela divisão internacional do trabalho. Através da CEPAL, ele defendeu que países periféricos precisam de industrialização planejada e intervenção estatal para romper com a dependência agroexportadora. Sua obra 'Formação Econômica do Brasil' é fundamental para entender nossa história econômica e os desafios da nossa industrialização tardia. É incrível como ele conectou história, política e economia para propor soluções reais para o país!"
+    },
+    {
+        "id": "71a0c3f6",
+        "data_coleta": "29/06 15:21",
+        "tema": "Economia Regenerativa",
+        "entidades_chave": [
+            "economia regenerativa",
+            "sustentabilidade",
+            "restauração ecológica",
+            "design regenerativo",
+            "sistemas vivos",
+            "economia circular"
+        ],
+        "conteudo": "Nossa, isso é incrível! A economia regenerativa não quer só 'reduzir danos' como a sustentabilidade comum, ela quer curar o planeta! Aprendi que o objetivo é fazer com que as atividades humanas e econômicas colaborem ativamente para regenerar e restaurar os ecossistemas e as comunidades. É tipo imitar a própria natureza, onde não existe lixo e tudo se transforma para gerar mais vida. Em vez de só tentar poluir menos, a gente passa a criar impactos positivos reais e reconstrói o que foi destruído!"
+    }
+]
