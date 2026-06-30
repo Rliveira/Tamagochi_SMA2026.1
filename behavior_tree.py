@@ -107,6 +107,8 @@ def contem_alguma(texto: str, palavras: Sequence[str]) -> bool:
 
 
 def estagio_por_idade(idade: int) -> str:
+    if idade < 5:
+        return "0_egg"
     if idade < 20:
         return "1_togepi"
     if idade < 50:
