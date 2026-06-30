@@ -88,7 +88,7 @@ class TamagotchiDesktop(QWidget):
         # Janela de animação do sprite
         self.label_imagem = QLabel(self)
         self.label_imagem.setScaledContents(True)
-        self.label_imagem.setFixedSize(60, 60)
+        self.label_imagem.setFixedSize(100, 100)
         self.layout_principal.addWidget(self.label_imagem, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # HUD / Barras
@@ -223,11 +223,12 @@ class TamagotchiDesktop(QWidget):
 
     def passo_evolucao(self, estagio_velho, estagio_novo):
         """Executa a animação de evolução por 6 segundos com som e trava com MessageBox."""
-        # 1. Informa o jogador no balão de fala
+        # pausa o motor para ele não disparar mais sinais de evolução
+        self.motor.pausado = True
+        
         nome_atual = self.motor.blackboard.get("nome_pet", "Pet")
         self.exibir_balao(f"O que está acontecendo com {nome_atual}?! ✨", tempo_ms=6000)
         
-        # 2. Carrega e toca o som de evolução (evolution.wav)
         diretorio_efects_pai = os.path.dirname(self.diretorio_sons)
         caminho_evolution_som = os.path.join(diretorio_efects_pai, "evolution.wav")
         
@@ -237,38 +238,37 @@ class TamagotchiDesktop(QWidget):
             self.som_cry.setVolume(0.6)
             self.som_cry.play()
         
-        # 3. Força a execução dos sprites da pasta 'evolution' do estágio antigo por 6 segundos
         self.carregar_animacao_visual(estagio_velho, "evolution", duracao_ms=6000)
         
-        # 4. Agenda o travamento da tela para quando a animação de 6 segundos terminar
         QTimer.singleShot(6000, lambda: self.finalizar_evolucao(estagio_novo))
 
     def finalizar_evolucao(self, estagio_novo):
         """Gera o som clássico do pokémon novo e joga o pop-up de bloqueio na tela."""
-        # Toca o grito (Cry) do novo estágio alcançado
         self.atualizar_audio_estagio(estagio_novo)
         self.tocar_som()
         
-        # Altera o balão de fala para comemorar
         nome_atual = self.motor.blackboard.get("nome_pet", "Pet")
         traducao_fase = {"2_togetic": "Togetic", "3_togekiss": "Togekiss"}
         nome_especie = traducao_fase.get(estagio_novo, "Pokémon")
         
         self.exibir_balao(f"Parabéns! Seu {nome_atual} evoluiu para {nome_especie}! 🎉", tempo_ms=8000)
         
-        # O BLOQUEADOR: Abre o pop-up que paralisa o app até o usuário clicar em OK
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Evolução!")
         msg_box.setText(f"✨ {nome_atual} evoluiu com sucesso para {nome_especie}! ✨")
         msg_box.setIcon(QMessageBox.Icon.Information)
         msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
         
-        # O script fica travado EXATAMENTE nesta linha. Nada se move visualmente abaixo dela.
         msg_box.exec()
         
-        # 5. Após o usuário clicar em OK, restaura o fluxo normal rodando o movimento da nova fase
+        # após fechar o MessageBox, atualiza o estado biológico e a animação para o novo estágio
         self.efeito_visual_ativo = False
-        self.carregar_animacao_motor(estagio_novo, "movement")
+        self.estado_biologico_atual = (estagio_novo, "movement")
+        self.animacao_atual = ""
+        self._carregar_animacao(estagio_novo, "movement")
+        
+        # Reativa o motor para continuar a evolução normal
+        self.motor.pausado = False
 
     def _resolver_diretorio_sprites(self):
         diretorio_base = os.path.dirname(os.path.abspath(__file__))
@@ -443,7 +443,7 @@ class TamagotchiDesktop(QWidget):
             },
             "1_togepi": {
                 "movement": "movement",
-                "sleep": "asleep", 
+                "sleep": "sleeping", 
                 "eat": "eating",
                 "play": "playing",
                 "sad": "sad",
@@ -563,31 +563,47 @@ class TamagotchiDesktop(QWidget):
         if estagio_vida == "1_togepi" and self.motor.blackboard["nome_pet"] == "Ovo":
             return
 
-        # Evita re-executar se forem os mesmos
+        # Se a UI já está no estagio_vida novo, ignora qualquer sinal atrasado de evolução
+        if self.estado_biologico_atual[0] == estagio_vida and emocao == "evolution":
+            return
+
         if self.estado_biologico_atual[0] != "0_egg" and self.estado_biologico_atual[0] != estagio_vida:
             estagio_anterior = self.estado_biologico_atual[0]
-            
-            # Se o estágio anterior possuir a pasta de evolução (Togepi ou Togetic)
-            if estagio_anterior in ["1_togepi", "2_togetic"]:
-                self.estado_biologico_atual = (estagio_vida, emocao)
+            if estagio_anterior in ["1_togepi", "2_togetic"] and estagio_vida in ["2_togetic", "3_togekiss"]:
+                try:
+                    self.motor.mudar_animacao.disconnect(self.carregar_animacao_motor)
+                except TypeError:
+                    pass
                 self.animacao_atual = ""
-                
-                # Dispara a sequência travada de evolução
                 self.passo_evolucao(estagio_anterior, estagio_vida)
                 return
 
+        # Bloqueia qualquer atualização comum se estiver em animação travada
+        if self.efeito_visual_ativo and not self.motor.blackboard.get("em_foco"):
+            return
+
+    
+        # Alinhamento simultâneo (sprite + som  + texto)    
         if emocao in ["hungry", "tired", "bored", "sad", "hurt"]:
             self.atualizar_audio_estagio(estagio_vida)
             self.tocar_som()
+            
+            # Força o balão de fala a alinhar imediatamente com o sprite acionado
+            if emocao == "hungry":
+                self.exibir_balao("Toge... ronnc... (Estou com fome!) 🍖", tempo_ms=4000)
+            elif emocao == "tired":
+                self.exibir_balao("*bocejo* ...zzZ (Que sono...) ⚡", tempo_ms=4000)
+            elif emocao == "bored":
+                self.exibir_balao("Toge toge! (Vamos brincar? Clica em mim!) 🎮", tempo_ms=4000)
 
-        # Evita re-executar se forem os mesmos
         if self.estado_biologico_atual == (estagio_vida, emocao) and len(self.frames) > 0:
             return
             
+        if self.estado_biologico_atual[0] != estagio_vida:
+            self.atualizar_audio_estagio(estagio_vida)
+            self.tocar_som()
+
         self.estado_biologico_atual = (estagio_vida, emocao)
-        
-        if self.efeito_visual_ativo and not self.motor.blackboard.get("em_foco"):
-            return
         self._carregar_animacao(estagio_vida, emocao)
 
     def carregar_animacao_visual(self, estagio_vida, emocao, duracao_ms=1200):
@@ -631,12 +647,52 @@ class TamagotchiDesktop(QWidget):
         estagio = evento_visual.get("estagio", self.estado_biologico_atual[0])
         emocao = evento_visual.get("emocao", "movement")
         duracao_ms = evento_visual.get("duracao_ms", 1200)
+
+        # 🔊 O BARULHO DO CRY: Se a IA mandar uma reação emocional marcante, solta o grito na hora!
+        if emocao in ["happy", "sad", "hurt", "hungry", "tired", "bored"]:
+            self.atualizar_audio_estagio(estagio)
+            self.tocar_som()
+
+        self.carregar_animacao_visual(estagio, emocao, duracao_ms)
+
+        evento_id = evento_visual.get("id")
+        if evento_id is None or evento_id == self.efeito_visual_tool_id:
+            return
+
+        self.efeito_visual_tool_id = evento_id
+        estagio = evento_visual.get("estagio", self.estado_biologico_atual[0])
+        emocao = evento_visual.get("emocao", "movement")
+        duracao_ms = evento_visual.get("duracao_ms", 1200)
         self.carregar_animacao_visual(estagio, emocao, duracao_ms)
 
     def atualizar_frame(self):
         if self.frames:
+            # Aplica o frame atual no QLabel do pet
             self.label_imagem.setPixmap(self.frames[self.frame_atual_index])
-            self.frame_atual_index = (self.frame_atual_index + 1) % len(self.frames)
+            
+            # Calcula qual seria o próximo índice do frame
+            proximo_index = self.frame_atual_index + 1
+            
+            # Se o ciclo de frames da subpasta atual chegou ao FIM...
+            if proximo_index >= len(self.frames):
+                estagio_vida, emocao = self.estado_biologico_atual
+                
+                # Se for uma animação contínua (como caminhar, tédio ou estudo), força o sorteio de uma nova variante
+                if emocao in ["movement", "study", "bored"]:
+                    if self.motor.blackboard.get("em_foco"):
+                        emocao = "study"
+                    
+                    # Rompe a trava de igualdade redefinindo o caminho da animação atual como vazio
+                    self.animacao_atual = ""
+                    
+                    # Invoca o carregador básico para rodar o passo 5 (sortear nova subpasta)
+                    self._carregar_animacao(estagio_vida, emocao)
+                
+                # Reseta o index para iniciar do primeiro frame da pasta nova (ou da mesma, se sorteada novamente)
+                self.frame_atual_index = 0
+            else:
+                # Se não chegou ao fim, avança o frame normalmente no próximo tick de 300ms
+                self.frame_atual_index = proximo_index
             
     def _interromper_sono(self):
         """Acorda o pet forçadamente se ele for interrompido durante o sono."""
@@ -730,7 +786,7 @@ class TamagotchiDesktop(QWidget):
         mensagem_retorno = self.motor.alimentar()
         self.exibir_balao(mensagem_retorno, tempo_ms=3500)
         
-        # 🍎 TRAVA VISUAL: Força os sprites de 'eat' (eating) por 2.5 segundos
+        # Força os sprites de 'eat' (eating) por 2.5 segundos
         self.carregar_animacao_visual(estagio, "eat", duracao_ms=2500)
 
     def brincar_com_pet(self):
@@ -741,7 +797,7 @@ class TamagotchiDesktop(QWidget):
         mensagem_retorno = self.motor.brincar()
         self.exibir_balao(mensagem_retorno, tempo_ms=3500)
         
-        # 🎾 TRAVA VISUAL: Força os sprites de 'play' (playing) por 3 segundos
+        # Força os sprites de 'play' (playing) por 3 segundos
         self.carregar_animacao_visual(estagio, "play", duracao_ms=3000)
 
     def descansar_pet(self):
@@ -756,9 +812,7 @@ class TamagotchiDesktop(QWidget):
         mensagem_retorno = self.motor.descansar()
         self.exibir_balao(mensagem_retorno, tempo_ms=3500)
         
-        # 💤 TRAVA VISUAL DE SONO: Força a animação 'sleep' (asleep/sleeping)
-        # Como o sono é contínuo e controlado pelo loop do timer_sono, 
-        # nós definimos uma duração longa inicial, e o próprio _processar_sono cuida do loop.
+        # Força a animação 'sleep' 
         self.carregar_animacao_visual(estagio, "sleep", duracao_ms=2000)
         
         if self.motor.blackboard.get("energia", 0) < 100:
