@@ -26,7 +26,7 @@ class MotorBiologico(QThread):
             "nome_pet": "bebê"
         }
         self.arvore_comportamental = build_biological_behavior_tree()
-
+        self.pausado = False
         self.contador_alerta = 0
         
     def _obter_multiplicadores(self):
@@ -34,53 +34,48 @@ class MotorBiologico(QThread):
         idade = self.blackboard["maturidade"]
         
         if idade < 20:   # 1_togepi (Bebê)
-            return {"fome": 6, "energia": -3, "tedio": 0} # Tédio 0 para simplificar
+            return {"fome": 12, "energia": -6, "tedio": 16} 
         elif idade < 50: # 2_togetic (Adolescente)
-            return {"fome": 3, "energia": -2, "tedio": 4}
+            return {"fome": 6, "energia": -4, "tedio": 8}
         else:            # 3_togekiss (Adulto)
-            return {"fome": 1, "energia": -1, "tedio": 2}
+            return {"fome": 2, "energia": -2, "tedio": 4}
 
     def run(self):
-        """
-        Loop assíncrono que roda em segundo plano.
-        """
+        """Loop assíncrono que roda em segundo plano."""
         ciclos_segundos = 0
         
         while self.blackboard["vivo"]:
-            time.sleep(1) # O relógio bate a cada segundo silenciosamente
+            time.sleep(1)
+            
+            # Se o motor estiver pausado (em evolução), ignora o ciclo e espera
+            if self.pausado:
+                continue
+                
             ciclos_segundos += 1
             
             if ciclos_segundos >= 15:
-                # caso esteja em estagio de ovo, apenas o status de maturidade atualiza
+                # Caso esteja em estagio de ovo...
                 if self.blackboard["maturidade"] < 5:
-                    # O ovo não sente fome, tédio ou cansaço. Só envelhece para chocar!
                     self.blackboard["maturidade"] += 1
-                    
-                    # Força o ovo a dar uma tremidinha instintiva enquanto choca
                     self._avaliar_estado_fisico()
-                
-                # caso tenha nascido, o metabolismo normal acontece
+                # Caso tenha nascido...
                 else:
                     mult = self._obter_multiplicadores()
-            
                     self.blackboard["fome"] = min(100, self.blackboard["fome"] + mult["fome"])
                     self.blackboard["energia"] = max(0, self.blackboard["energia"] + mult["energia"])
                     self.blackboard["tedio"] = min(100, self.blackboard["tedio"] + mult["tedio"])
                     self.blackboard["maturidade"] += 1
                     
-                    # Penalidades médicas caso o pet esteja em estado crítico
                     if self.blackboard["fome"] >= 85 or self.blackboard["energia"] <= 15:
                         self.blackboard["saude"] = max(0, self.blackboard["saude"] - 8)
                     
                     if self.blackboard["saude"] <= 0:
                         self.blackboard["vivo"] = False
                         
-                    # Checa se o corpo precisa mudar a animação por instinto
                     self._avaliar_estado_fisico()
                 
                 ciclos_segundos = 0
                 
-            # Dispara o sinal do status atualizado para a interface
             self.status_atualizado.emit(self.blackboard)
 
     def _avaliar_estado_fisico(self):
