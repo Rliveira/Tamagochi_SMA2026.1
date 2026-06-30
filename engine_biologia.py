@@ -20,12 +20,14 @@ class MotorBiologico(QThread):
             "energia": 90,
             "tedio": 30,
             "saude": 100,
-            "maturidade": 26,
+            "maturidade": 0,
             "vivo": True,
             "nome_dono": "dono",
             "nome_pet": "bebê"
         }
         self.arvore_comportamental = build_biological_behavior_tree()
+
+        self.contador_alerta = 0
         
     def _obter_multiplicadores(self):
         """Retorna (fome, energia, tedio) com base na maturidade."""
@@ -41,7 +43,6 @@ class MotorBiologico(QThread):
     def run(self):
         """
         Loop assíncrono que roda em segundo plano.
-        Substitui o nosso antigo "time.sleep(10)"
         """
         ciclos_segundos = 0
         
@@ -49,41 +50,82 @@ class MotorBiologico(QThread):
             time.sleep(1) # O relógio bate a cada segundo silenciosamente
             ciclos_segundos += 1
             
-            # O metabolismo real e pesado acontece a cada 300 segundos (5 minutos)
-            if ciclos_segundos >= 5:
-                mult = self._obter_multiplicadores()
-        
-                self.blackboard["fome"] = min(100, self.blackboard["fome"] + mult["fome"])
-                self.blackboard["energia"] = max(0, self.blackboard["energia"] + mult["energia"])
-                self.blackboard["tedio"] = min(100, self.blackboard["tedio"] + mult["tedio"])
-                self.blackboard["maturidade"] += 1
-                
-                # Penalidades médicas caso o pet esteja em estado crítico
-                if self.blackboard["fome"] >= 85 or self.blackboard["energia"] <= 15:
-                    self.blackboard["saude"] = max(0, self.blackboard["saude"] - 8)
-                
-                if self.blackboard["saude"] <= 0:
-                    self.blackboard["vivo"] = False
+            if ciclos_segundos >= 15:
+                # caso esteja em estagio de ovo, apenas o status de maturidade atualiza
+                if self.blackboard["maturidade"] < 5:
+                    # O ovo não sente fome, tédio ou cansaço. Só envelhece para chocar!
+                    self.blackboard["maturidade"] += 1
                     
-                # Checa se o corpo precisa mudar a animação por instinto
-                self._avaliar_estado_fisico()
+                    # Força o ovo a dar uma tremidinha instintiva enquanto choca
+                    self._avaliar_estado_fisico()
+                
+                # caso tenha nascido, o metabolismo normal acontece
+                else:
+                    mult = self._obter_multiplicadores()
+            
+                    self.blackboard["fome"] = min(100, self.blackboard["fome"] + mult["fome"])
+                    self.blackboard["energia"] = max(0, self.blackboard["energia"] + mult["energia"])
+                    self.blackboard["tedio"] = min(100, self.blackboard["tedio"] + mult["tedio"])
+                    self.blackboard["maturidade"] += 1
+                    
+                    # Penalidades médicas caso o pet esteja em estado crítico
+                    if self.blackboard["fome"] >= 85 or self.blackboard["energia"] <= 15:
+                        self.blackboard["saude"] = max(0, self.blackboard["saude"] - 8)
+                    
+                    if self.blackboard["saude"] <= 0:
+                        self.blackboard["vivo"] = False
+                        
+                    # Checa se o corpo precisa mudar a animação por instinto
+                    self._avaliar_estado_fisico()
+                
                 ciclos_segundos = 0
                 
-            # Dispara o sinal do status atualizado
+            # Dispara o sinal do status atualizado para a interface
             self.status_atualizado.emit(self.blackboard)
 
     def _avaliar_estado_fisico(self):
         """
-        Avalia o Blackboard por uma Behavior Tree explícita e decide qual é o sprite correto agora.
+        Avalia as necessidades críticas e injeta estados periódicos de reclamação (com som).
         """
         contexto = BehaviorContext(blackboard=self.blackboard)
         decisao = self.arvore_comportamental.run(contexto)
+        
+        # Se for ovo, mantém o comportamento padrão determinado na árvore
+        if decisao.estagio == "0_egg":
+            self.mudar_animacao.emit(decisao.estagio, decisao.emocao)
+            return
 
+        # definindo os estados críticos para fome, energia e tédio
+        fome_critica = self.blackboard["fome"] > 75
+        energia_critica = self.blackboard["energia"] < 25
+        tedio_critico = self.blackboard["tedio"] > 75
+        
+        if fome_critica or energia_critica or tedio_critico:
+            self.contador_alerta += 1
+            
+            # A cada 3 ciclos de atualização, ele força 
+            # o sprite de reclamação para chamar atenção
+            if self.contador_alerta >= 3: 
+                if fome_critica:
+                    emocao_alerta = "hungry"
+                elif energia_critica:
+                    emocao_alerta = "tired"
+                else:
+                    emocao_alerta = "bored"
+                
+                # Emite a animação de reclamação e força o reset do contador
+                self.mudar_animacao.emit(decisao.estagio, emocao_alerta)
+                self.contador_alerta = 0
+                return
+                
+        # Se os status estiverem normais ou não for o momento do tick de alerta, roda a árvore padrão
         if decisao.estagio:
             self.mudar_animacao.emit(decisao.estagio, decisao.emocao)
 
     def _estagio_atual(self):
         idade = self.blackboard["maturidade"]
+        if idade < 5:
+            return "0_egg"
         if idade < 20:
             return "1_togepi"
         if idade < 50:
