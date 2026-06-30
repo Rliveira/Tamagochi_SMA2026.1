@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QVBoxLayout,
     QWidget,
-    QHBoxLayout
+    QHBoxLayout, QMessageBox
 )
 from PyQt6.QtMultimedia import QSoundEffect  
 from dotenv import load_dotenv
@@ -112,7 +112,7 @@ class TamagotchiDesktop(QWidget):
         self.frame_atual_index = 0
         self.animacao_atual = ""
         self.estado_emocional_atual = "movement"
-        self.estado_biologico_atual = ("1_togepi", "movement")
+        self.estado_biologico_atual = ("0_egg", "movement")
         self.efeito_visual_tool_id = 0
         self.efeito_visual_ativo = False
         
@@ -122,13 +122,14 @@ class TamagotchiDesktop(QWidget):
 
         # Áudio
         self.som_cry = QSoundEffect(self)
-        self.diretorio_sons = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds_of_cry")
-        self.atualizar_audio_estagio("1_togepi")
-        self.tocar_som()
+        self.diretorio_sons = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "sounds_efects", "sounds_of_cry"
+        )
+        self.atualizar_audio_estagio("0_egg") 
 
         self.timer_animacao = QTimer(self)
         self.timer_animacao.timeout.connect(self.atualizar_frame)
-        self.timer_animacao.start(150)
+        self.timer_animacao.start(300)
 
         # Integração com o Motor Biológico Estendido
         self.motor = MotorBiologico()
@@ -176,26 +177,98 @@ class TamagotchiDesktop(QWidget):
         else:
             self.motor.blackboard["traco_admirado"] = "lealdade"
 
-        self.exibir_balao("*O ovo reage à sua aura...*", tempo_ms=3500)
-        QTimer.singleShot(3500, self.passo_3_chocar)
+        self.exibir_balao("*O ovo absorve sua aura e começa a incubação...*", tempo_ms=4000)
+        
+        # A vida biológica começa aqui, COM O OVO EM MATURIDADE 0!
+        self.motor.start()
 
     def passo_3_chocar(self):
-        # O ovo evolui magicamente
-        self.motor.blackboard["maturidade"] = 5
-        self.carregar_animacao_motor("1_togepi", "movement")
+        """Esta função agora só será chamada AUTOMATICAMENTE pela biologia quando o ovo estiver pronto!"""
+        self.animacao_atual = "" 
         
+        # carregando som do ovo rachando
+        diretorio_efects_pai = os.path.dirname(self.diretorio_sons)
+        caminho_crack = os.path.join(diretorio_efects_pai, "egg_cracking.wav")
+
+        if os.path.exists(caminho_crack):
+            self.som_cry.setSource(QUrl.fromLocalFile(caminho_crack))
+            self.som_cry.setVolume(0.6) # Volume ligeiramente mais alto para destacar os estalos
+            self.som_cry.play()
+        else:
+            print(f"⚠️ AVISO: Som de rachadura não encontrado: {caminho_crack}")
+        
+        # Força a execução da animação de quebra do ovo 'born' por 3 segundos
+        self.carregar_animacao_visual("0_egg", "born", duracao_ms=3000)
+        
+        # Espera os 3 segundos da animação de quebra acabar para nascer e batizar
+        QTimer.singleShot(3000, self.passo_4_batismo)
+
+    def passo_4_batismo(self):
+        # Carrega e toca o Cry oficial dele imediatamente
+        self.atualizar_audio_estagio("1_togepi")
+        self.tocar_som()
+
+        #  Abre a caixinha para o usuário digitar o nome
         nome_pet, ok = QInputDialog.getText(self, "Nascimento!", "O ovo chocou! Como você vai chamá-lo?")
         if ok and nome_pet.strip():
             self.motor.blackboard["nome_pet"] = nome_pet.strip()
         else:
             self.motor.blackboard["nome_pet"] = "Bebê Togepi"
 
-        # Mensagem de boas vindas
         nome = self.motor.blackboard["nome_pet"]
         self.exibir_balao(f"Toge toge! (Oi, eu sou o {nome}!)", tempo_ms=5000)
         
-        # AGORA SIM, a vida biológica começa a correr!
-        self.motor.start()
+        # Atualiza a árvore para liberar o estado biológico do Togepi bebê andando
+        self.carregar_animacao_motor("1_togepi", "movement")
+
+    def passo_evolucao(self, estagio_velho, estagio_novo):
+        """Executa a animação de evolução por 6 segundos com som e trava com MessageBox."""
+        # 1. Informa o jogador no balão de fala
+        nome_atual = self.motor.blackboard.get("nome_pet", "Pet")
+        self.exibir_balao(f"O que está acontecendo com {nome_atual}?! ✨", tempo_ms=6000)
+        
+        # 2. Carrega e toca o som de evolução (evolution.wav)
+        diretorio_efects_pai = os.path.dirname(self.diretorio_sons)
+        caminho_evolution_som = os.path.join(diretorio_efects_pai, "evolution.wav")
+        
+        if os.path.exists(caminho_evolution_som):
+            self.som_cry.stop()
+            self.som_cry.setSource(QUrl.fromLocalFile(caminho_evolution_som))
+            self.som_cry.setVolume(0.6)
+            self.som_cry.play()
+        
+        # 3. Força a execução dos sprites da pasta 'evolution' do estágio antigo por 6 segundos
+        self.carregar_animacao_visual(estagio_velho, "evolution", duracao_ms=6000)
+        
+        # 4. Agenda o travamento da tela para quando a animação de 6 segundos terminar
+        QTimer.singleShot(6000, lambda: self.finalizar_evolucao(estagio_novo))
+
+    def finalizar_evolucao(self, estagio_novo):
+        """Gera o som clássico do pokémon novo e joga o pop-up de bloqueio na tela."""
+        # Toca o grito (Cry) do novo estágio alcançado
+        self.atualizar_audio_estagio(estagio_novo)
+        self.tocar_som()
+        
+        # Altera o balão de fala para comemorar
+        nome_atual = self.motor.blackboard.get("nome_pet", "Pet")
+        traducao_fase = {"2_togetic": "Togetic", "3_togekiss": "Togekiss"}
+        nome_especie = traducao_fase.get(estagio_novo, "Pokémon")
+        
+        self.exibir_balao(f"Parabéns! Seu {nome_atual} evoluiu para {nome_especie}! 🎉", tempo_ms=8000)
+        
+        # O BLOQUEADOR: Abre o pop-up que paralisa o app até o usuário clicar em OK
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Evolução!")
+        msg_box.setText(f"✨ {nome_atual} evoluiu com sucesso para {nome_especie}! ✨")
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        
+        # O script fica travado EXATAMENTE nesta linha. Nada se move visualmente abaixo dela.
+        msg_box.exec()
+        
+        # 5. Após o usuário clicar em OK, restaura o fluxo normal rodando o movimento da nova fase
+        self.efeito_visual_ativo = False
+        self.carregar_animacao_motor(estagio_novo, "movement")
 
     def _resolver_diretorio_sprites(self):
         diretorio_base = os.path.dirname(os.path.abspath(__file__))
@@ -246,22 +319,25 @@ class TamagotchiDesktop(QWidget):
         self._atualizar_barra_fase(blackboard.get("maturidade", 0))
         self._verificar_efeito_visual_tool(blackboard)
         
-        # GATILHO IMEDIATO: Se a IA acabou de ligar o foco, muda a animação na hora
+        # Se a IA acabou de ligar o foco, muda a animação na hora
         if blackboard.get("em_foco") and self.estado_emocional_atual != "study":
             self.carregar_animacao_motor(self.estado_biologico_atual[0], "study")
 
-        # SILÊNCIO NOS ESTUDOS: Só pensa sozinho se não estiver dormindo E não estiver focado
-        if not self.balao_fala.isVisible() and not self.timer_sono.isActive() and not blackboard.get("em_foco"):
-            if random.random() < 0.15:
-                self.gerar_pensamento_autonomo(blackboard)
-
-        # Pensamentos mais frequentes por conta do metabolismo rápido do Togepi
-        if not self.balao_fala.isVisible() and random.random() < 0.15:
-            self.gerar_pensamento_autonomo(blackboard)
+        # Só tenta processar pensamentos autônomos se NÃO for mais ovo
+        if blackboard.get("nome_pet") != "Ovo":
             
-        # Evita pensar enquanto dorme adicionando a verificação do timer_sono
-        if not self.balao_fala.isVisible() and not self.timer_sono.isActive() and random.random() < 0.15:
-            self.gerar_pensamento_autonomo(blackboard)
+            # Só pensa sozinho se não estiver dormindo E não estiver focado
+            if not self.balao_fala.isVisible() and not self.timer_sono.isActive() and not blackboard.get("em_foco"):
+                if random.random() < 0.15:
+                    self.gerar_pensamento_autonomo(blackboard)
+
+            # Pensamentos mais frequentes por conta do metabolismo rápido do Togepi bebê
+            if not self.balao_fala.isVisible() and random.random() < 0.20:
+                self.gerar_pensamento_autonomo(blackboard)
+                
+            # Evita pensar enquanto dorme adicionando a verificação do timer_sono
+            if not self.balao_fala.isVisible() and not self.timer_sono.isActive() and random.random() < 0.15:
+                self.gerar_pensamento_autonomo(blackboard)
 
     def _atualizar_barra_fase(self, maturidade):
         if maturidade < 20:
@@ -275,6 +351,11 @@ class TamagotchiDesktop(QWidget):
         self.barra_fase.setValue(max(0, min(100, progresso)))
 
     def gerar_pensamento_autonomo(self, blackboard):
+
+        # Evita gerar pensamentos enquanto o ovo ainda não chocou
+        if self.estado_biologico_atual[0] == "0_egg":
+            return
+        
         if blackboard.get("fome", 0) > 75:
             pensamento = "Toge... ronnc... (fome)"
         elif blackboard.get("energia", 100) < 25:
@@ -295,7 +376,6 @@ class TamagotchiDesktop(QWidget):
                 pensamento = "Zzz..."
             else:
                 pensamento = "*Cantarolando feliz*"
-                self.tocar_som() 
 
         self.exibir_balao(pensamento, tempo_ms=4000)
 
@@ -357,14 +437,21 @@ class TamagotchiDesktop(QWidget):
         # 1. O TRADUTOR DEFINITIVO
         mapa_animacoes = {
             "0_egg": {
-                "movement": "movements", 
-                "sleep": "movements",    
-                "sad": "movements",
-                "happy": "movements"
+                "movement": "movement", 
+                "born": "born",
+                "stoped": "stoped",
             },
             "1_togepi": {
                 "movement": "movement",
-                "sleep": "asleep",       
+                "sleep": "asleep", 
+                "eat": "eating",
+                "play": "playing",
+                "sad": "sad",
+                "Tired": "tired",
+                "happy": "happy",
+                "evolution": "evolution",
+                "hungry": "hungry",    
+                "dead": "dead"
             },
             "2_togetic": {
                 "movement": "movement",
@@ -378,11 +465,12 @@ class TamagotchiDesktop(QWidget):
                 "study": "study",
                 "tired": "tired",
                 "hungry": "hungry",
-                "evolution": "evolution"
+                "evolution": "evolution",
+                "dead": "dead"
             },
             "3_togekiss": {
                 "movement": "movement",
-                "sleep": "sleep",        
+                "sleep": "sleeping",        
                 "eat": "eating",
                 "play": "playing",
                 "sad": "sad",
@@ -391,7 +479,8 @@ class TamagotchiDesktop(QWidget):
                 "bored": "bored",
                 "study": "study",
                 "tired": "tired",
-                "hungry": "hungry"
+                "hungry": "hungry",
+                "dead": "dead"
             }
         }
 
@@ -417,34 +506,37 @@ class TamagotchiDesktop(QWidget):
         else:
             self.estado_emocional_atual = emocao
 
-        # ==========================================
-        # 5. O MERGULHADOR DE SUBPASTAS (NOVIDADE)
-        # ==========================================
-        # Verifica o que tem dentro da pasta escolhida
+        # 5. O MERGULHADOR DE SUBPASTAS COM SORTEIO ALEATÓRIO
+        # Verifica o que tem dentro da pasta traduzida
         itens_na_pasta = os.listdir(caminho_pasta)
         tem_pngs_diretos = any(f.lower().endswith('.png') for f in itens_na_pasta)
         
-        # Se não tem PNGs diretos, procura em subpastas
+        # Se não houver fotos soltas na pasta mãe, significa que existem variantes (subpastas)
         if not tem_pngs_diretos:
-            subpastas = [d for d in itens_na_pasta if os.path.isdir(os.path.join(caminho_pasta, d))]
+            subpastas = [
+                d for d in itens_na_pasta 
+                if os.path.isdir(os.path.join(caminho_pasta, d))
+            ]
+            
             if subpastas:
-                # Tenta achar uma pasta de 'frente' como padrão, senão pega a primeira
-                subpasta_escolhida = next((d for d in subpastas if 'front' in d.lower() or 'frente' in d.lower()), subpastas[0])
-                caminho_pasta = os.path.join(caminho_pasta, subpasta_escolhida)
+                # Sorteia aleatoriamente uma das subpastas variantes disponíveis
+                subpasta_sorteada = random.choice(subpastas)
+                caminho_pasta = os.path.join(caminho_pasta, subpasta_sorteada)
             else:
                 print(f"❌ ERRO: Nenhuma imagem ou subpasta encontrada em '{caminho_pasta}'!")
                 return
 
-        # ==========================================
-        # 6. CARREGAMENTO DOS FRAMES
-        # ==========================================
-        if self.animacao_atual == caminho_pasta:
+
+        # 6. CARREGAMENTO DOS FRAMES DA VARIANTE SORTEADA
+
+        # Se escolheu EXATAMENTE a mesma subpasta que já está rodando, 
+        # não limpa os frames para não dar um "soluço" no meio do passo
+        if self.animacao_atual == caminho_pasta and len(self.frames) > 0:
             return
 
         self.animacao_atual = caminho_pasta
         self.frames.clear()
 
-        # Filtra estritamente por PNG (ignorando maiúsculas/minúsculas)
         arquivos = sorted(
             [f for f in os.listdir(caminho_pasta) if f.lower().endswith('.png')],
             key=self._chave_ordenacao_frame,
@@ -458,13 +550,39 @@ class TamagotchiDesktop(QWidget):
         self.frame_atual_index = 0
 
     def carregar_animacao_motor(self, estagio_vida, emocao):
-        
         if self.motor.blackboard.get("em_foco"):
             emocao = "study"
+            
+        # Gatilho de choque do ovo (Fase 0 -> Fase 1)
+        if self.estado_biologico_atual[0] == "0_egg" and estagio_vida == "1_togepi":
+            self.estado_biologico_atual = (estagio_vida, emocao)
+            self.animacao_atual = ""
+            self.passo_3_chocar()
+            return
         
-        if self.estado_biologico_atual[0] != estagio_vida:
+        if estagio_vida == "1_togepi" and self.motor.blackboard["nome_pet"] == "Ovo":
+            return
+
+        # Evita re-executar se forem os mesmos
+        if self.estado_biologico_atual[0] != "0_egg" and self.estado_biologico_atual[0] != estagio_vida:
+            estagio_anterior = self.estado_biologico_atual[0]
+            
+            # Se o estágio anterior possuir a pasta de evolução (Togepi ou Togetic)
+            if estagio_anterior in ["1_togepi", "2_togetic"]:
+                self.estado_biologico_atual = (estagio_vida, emocao)
+                self.animacao_atual = ""
+                
+                # Dispara a sequência travada de evolução
+                self.passo_evolucao(estagio_anterior, estagio_vida)
+                return
+
+        if emocao in ["hungry", "tired", "bored", "sad", "hurt"]:
             self.atualizar_audio_estagio(estagio_vida)
             self.tocar_som()
+
+        # Evita re-executar se forem os mesmos
+        if self.estado_biologico_atual == (estagio_vida, emocao) and len(self.frames) > 0:
+            return
             
         self.estado_biologico_atual = (estagio_vida, emocao)
         
@@ -483,12 +601,18 @@ class TamagotchiDesktop(QWidget):
         self._carregar_animacao(estagio_vida, emocao)
 
     def atualizar_audio_estagio(self, estagio_vida):
+        # O ovo não tem som de grito, então ignoramos o carregamento
+        if estagio_vida == "0_egg":
+            return
+            
         nome_arquivo = f"{estagio_vida.split('_')[1]}_cry.wav"
         caminho_som = os.path.join(self.diretorio_sons, nome_arquivo)
         
         if os.path.exists(caminho_som):
             self.som_cry.setSource(QUrl.fromLocalFile(caminho_som))
             self.som_cry.setVolume(0.5)
+        else:
+            print(f"⚠️ AVISO: Arquivo de áudio não encontrado em: {caminho_som}")
 
     def tocar_som(self):
         if self.som_cry.status() != QSoundEffect.Status.Error:
@@ -598,19 +722,44 @@ class TamagotchiDesktop(QWidget):
         self.exibir_balao(f"Agora eu sou {self.motor.blackboard['nome_pet']} e meu dono é {self.motor.blackboard['nome_dono']}.", tempo_ms=5000)
 
     def alimentar_pet(self):
-        self.exibir_balao(self.motor.alimentar(), tempo_ms=3500)
+        estagio = self.estado_biologico_atual[0]
+        if estagio == "0_egg":
+            return
+            
+        # Executa a lógica biológica e pega o texto de resposta
+        mensagem_retorno = self.motor.alimentar()
+        self.exibir_balao(mensagem_retorno, tempo_ms=3500)
+        
+        # 🍎 TRAVA VISUAL: Força os sprites de 'eat' (eating) por 2.5 segundos
+        self.carregar_animacao_visual(estagio, "eat", duracao_ms=2500)
 
     def brincar_com_pet(self):
-        self.exibir_balao(self.motor.brincar(), tempo_ms=3500)
+        estagio = self.estado_biologico_atual[0]
+        if estagio == "0_egg":
+            return
+            
+        mensagem_retorno = self.motor.brincar()
+        self.exibir_balao(mensagem_retorno, tempo_ms=3500)
+        
+        # 🎾 TRAVA VISUAL: Força os sprites de 'play' (playing) por 3 segundos
+        self.carregar_animacao_visual(estagio, "play", duracao_ms=3000)
 
     def descansar_pet(self):
+        estagio = self.estado_biologico_atual[0]
+        if estagio == "0_egg":
+            return
 
         if self.timer_sono.isActive():
             self.exibir_balao("Já estou a dormir... zzz", tempo_ms=3000)
             return
 
-        mensagem = self.motor.descansar()
-        self.exibir_balao(mensagem, tempo_ms=3500)
+        mensagem_retorno = self.motor.descansar()
+        self.exibir_balao(mensagem_retorno, tempo_ms=3500)
+        
+        # 💤 TRAVA VISUAL DE SONO: Força a animação 'sleep' (asleep/sleeping)
+        # Como o sono é contínuo e controlado pelo loop do timer_sono, 
+        # nós definimos uma duração longa inicial, e o próprio _processar_sono cuida do loop.
+        self.carregar_animacao_visual(estagio, "sleep", duracao_ms=2000)
         
         if self.motor.blackboard.get("energia", 0) < 100:
             self.timer_sono.start(2000)
